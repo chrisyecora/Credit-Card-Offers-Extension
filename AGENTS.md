@@ -4,7 +4,7 @@
 
 This repository has two current components:
 
-- `main.py` is the local Playwright scraper. It captures Capital One offer-feed responses and writes normalized records to `offers.json`.
+- `scrape_capital_one.py` is the local Capital One Playwright scraper and writes `offers.json`. `scrape_amex.py` captures American Express offers and writes `offers_amex.json`; its parsing helpers live in `amex_offers.py`.
 - `offers-api/` is the Cloudflare Python Worker API. Its entry point is `offers-api/src/entry.py`; small reusable helpers belong beside it in `offers-api/src/`.
 - `offers-api/wrangler.jsonc` defines the Worker and its `offers_db` D1 binding. Python dependencies live in `offers-api/pyproject.toml`; Node tooling is defined in `offers-api/package.json`.
 
@@ -14,7 +14,8 @@ Keep runtime session material in `auth/` and `user_data/` local only. Neither is
 
 Run commands from the directory that owns the component.
 
-- `python main.py` runs the authenticated local scraper and updates `offers.json`.
+- `pipenv run python scrape_capital_one.py` runs the authenticated Capital One scraper and updates `offers.json`.
+- `pipenv run python scrape_amex.py` runs the authenticated American Express scraper and updates `offers_amex.json`.
 - `cd offers-api && uv sync` creates or synchronizes the Python Worker environment.
 - `cd offers-api && npm run dev` starts the Worker locally through `pywrangler`.
 - `cd offers-api && npm run deploy` deploys the Worker to Cloudflare.

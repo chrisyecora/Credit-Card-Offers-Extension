@@ -66,11 +66,14 @@ def offer_values(offer: object, last_seen_at: str, index: int) -> tuple[str, ...
 
     # The source ID is stable when provided. Only the known missing-ID case needs
     # a deterministic fallback identity.
-    identity = "\x00".join(
-        (bank_slug, raw_id)
-        if raw_id
-        else (bank_slug, values["domain"], values["merchant_name"], values["channel"])
-    )
+    if raw_id and bank_slug == "american_express":
+        # One AmEx offer can apply to more than one website.
+        identity_parts = (bank_slug, raw_id, values["domain"])
+    elif raw_id:
+        identity_parts = (bank_slug, raw_id)
+    else:
+        identity_parts = (bank_slug, values["domain"], values["merchant_name"], values["channel"])
+    identity = "\x00".join(identity_parts)
     source_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
     return (

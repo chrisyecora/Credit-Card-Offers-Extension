@@ -11,10 +11,46 @@ npm exec wrangler -- d1 migrations apply offers-db --remote
 python3 scripts/load_offers.py --apply
 ```
 
-The loader accepts the existing Capital One `offers.json`. New bank feeds should
+The loader accepts the existing Capital One `offers.json`. To collect and load
+American Express offers, run these commands from the repository root after
+logging in through the scraper's browser:
+
+```
+pipenv run python scrape_amex.py
+python offers-api/scripts/load_offers.py --input offers_amex.json
+python offers-api/scripts/load_offers.py --input offers_amex.json --apply
+```
+
+If AmEx login fails in the scraper browser, sign in using your usual browser,
+open DevTools Network, click Search with an empty query, and save the **Response**
+body from `ReadOffersHubPresentation.web.v1` as `auth/amex-response.json`.
+Then run `pipenv run python scrape_amex.py --input-payload auth/amex-response.json`.
+The `auth/` directory is ignored by Git; do not commit or share the raw response.
+
+Review the generated file and dry-run counts before `--apply`. Apply migration
+`0004_allow_offer_multiple_domains.sql` to the target D1 database before loading
+AmEx records. The scraper captures only merchant offers with explicitly qualifying
+website domains, reports skipped offers, and warns when a response reaches 100
+entries. It never enrolls an offer. The Capital One scraper is now
+`scrape_capital_one.py` and continues to write `offers.json`.
+
+If login fails in a Playwright-launched window, launch regular Chrome with a
+separate local profile and a loopback-only debugging port. Log in manually in
+that window, open AmEx Offers, then run the scraper in attach mode:
+
+```
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir="$PWD/user_data/amex-cdp"
+pipenv run python scrape_amex.py --cdp-url http://127.0.0.1:9222
+```
+
+Run these commands from the repository root. The scraper attaches to the open
+offers tab, clicks Search with an empty query, captures the network response,
+and writes normalized JSON. Close the debug-enabled Chrome window afterward.
+
+New bank feeds should
 provide `bank_slug` (lowercase letters, digits, and underscores) and `bank` (the
 display name) on every offer. Raw offer IDs only need to be unique within their
-bank. `/v1/offers?domain=example.com` returns offers from every loaded bank,
+bank and domain. `/v1/offers?domain=example.com` returns offers from every loaded bank,
 including both `bank` and `bank_slug` in each result.
 
 You can run the Worker defined by your new project by executing `wrangler dev` in this

@@ -102,10 +102,18 @@
     row.append(details);
 
     const link = document.createElement("a");
-    link.href = "https://capitaloneoffers.com";
+    const destinations = {
+      capital_one: { url: "https://capitaloneoffers.com", label: "Open Capital One offers" },
+      american_express: { url: "https://global.americanexpress.com/offers/eligible", label: "Open AmEx offers" },
+    };
+    const destination = destinations[offer.bank_slug];
+    if (!destination) {
+      return row;
+    }
+    link.href = destination.url;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "Open Capital One offers";
+    link.textContent = destination.label;
     row.append(link);
     return row;
   }
