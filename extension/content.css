@@ -1,0 +1,98 @@
+:host {
+  all: initial;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.offer-panel {
+  position: fixed;
+  z-index: 2147483647;
+  top: 20px;
+  right: 20px;
+  width: min(340px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 16px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #d9dee8;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(23 32 51 / 18%);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.offer-header,
+.offer-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.offer-header {
+  color: #536079;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.offer-close {
+  padding: 0 2px;
+  color: #536079;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.offer-merchant {
+  margin: 4px 0 12px;
+  color: #172033;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.offer-list {
+  display: grid;
+  gap: 10px;
+}
+
+.offer-row {
+  padding-top: 10px;
+  border-top: 1px solid #edf0f5;
+}
+
+.offer-details {
+  display: grid;
+  gap: 2px;
+}
+
+.offer-details span,
+.offer-details small,
+.offer-more {
+  color: #536079;
+}
+
+.offer-details small,
+.offer-more {
+  font-size: 11px;
+}
+
+.offer-row a {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  color: #ffffff;
+  background: #1769e0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.offer-row a:hover {
+  background: #1258bd;
+}
+
+.offer-more {
+  margin: 10px 0 0;
+}
