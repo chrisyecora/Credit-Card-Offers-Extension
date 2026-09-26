@@ -1,0 +1,37 @@
+# Authenticated scraper state and generated output
+/auth/
+/user_data/
+/offers.json
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.venv/
+
+# Local databases and operating-system files
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+.DS_Store
+
+# Worker and Node build artifacts
+**/node_modules/
+**/.wrangler/
+**/python_modules/
+**/.venv-workers/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*

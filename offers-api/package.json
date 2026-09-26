@@ -1,0 +1,14 @@
+{
+  "name": "offers-api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "uv run pywrangler deploy",
+    "dev": "uv run pywrangler dev",
+    "load-offers": "python3 scripts/load_offers.py --apply",
+    "start": "uv run pywrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.141.0"
+  }
+}

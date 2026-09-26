@@ -1,0 +1,20 @@
+# Local Worker configuration and state
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+.wrangler/
+
+# Installed dependencies and virtual environments
+node_modules/
+python_modules/
+.venv/
+.venv-workers/
+
+# Tooling output
+*.tsbuildinfo
+.eslintcache
+.npm/
+.vscode-test/
+*.tgz
+*.log
