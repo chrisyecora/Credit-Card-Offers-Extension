@@ -50,6 +50,7 @@ async def main():
                                 "reward_rate": item.get("buttonText"),
                                 "channel": item.get("text"),
                                 "bank": "Capital One",
+                                "bank_slug": "capital_one",
                                 "raw_id": item.get("id"),
                                 "logo_url": item.get("imageSrc")
                             }

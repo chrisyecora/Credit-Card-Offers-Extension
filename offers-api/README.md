@@ -1,5 +1,22 @@
 ## Usage
 
+### Multi-bank data
+
+Migration `0002_create_banks.sql` drops the old `offers` table and creates
+`banks` plus bank-scoped offers. Applying it deletes existing offers. After
+configuring Cloudflare credentials, run from `offers-api/`:
+
+```
+npm exec wrangler -- d1 migrations apply offers-db --remote
+python3 scripts/load_offers.py --apply
+```
+
+The loader accepts the existing Capital One `offers.json`. New bank feeds should
+provide `bank_slug` (lowercase letters, digits, and underscores) and `bank` (the
+display name) on every offer. Raw offer IDs only need to be unique within their
+bank. `/v1/offers?domain=example.com` returns offers from every loaded bank,
+including both `bank` and `bank_slug` in each result.
+
 You can run the Worker defined by your new project by executing `wrangler dev` in this
 directory. This will start up an HTTP server and will allow you to iterate on your
 Worker without having to restart `wrangler`.

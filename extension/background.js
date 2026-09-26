@@ -1,3 +1,5 @@
+importScripts("node_modules/tldts/dist/index.umd.min.js");
+
 const API_BASE_URL = "https://offers-api.chris-yecora.workers.dev";
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -5,8 +7,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  const domain = message.domain.trim().toLowerCase();
-  console.info("[offer-checker] lookup requested", domain);
+  const hostname = message.domain.trim().toLowerCase();
+  const domain = tldts.getDomain(hostname);
+  console.info("[offer-checker] lookup requested", hostname, "as", domain);
   if (!domain) {
     sendResponse({ offers: [] });
     return false;

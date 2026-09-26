@@ -6,18 +6,24 @@ from workers import Response, WorkerEntrypoint
 
 CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
 OFFER_FIELDS = """
-    domain,
-    merchant_name,
-    reward_rate,
-    channel,
-    bank,
-    logo_url,
-    last_seen_at
+    offers.domain,
+    offers.merchant_name,
+    offers.reward_rate,
+    offers.channel,
+    banks.name AS bank,
+    banks.slug AS bank_slug,
+    offers.logo_url,
+    offers.last_seen_at
 """
 
 
-def json_response(data, status: HTTPStatus = HTTPStatus.OK) -> Response:
-    return Response.json(data, status=status, headers=CORS_HEADERS)
+def json_response(
+    data,
+    status: HTTPStatus = HTTPStatus.OK,
+    headers: dict[str, str] | None = None,
+) -> Response:
+    response_headers = {**CORS_HEADERS, **(headers or {})}
+    return Response.json(data, status=status, headers=response_headers)
 
 
 def normalize_domain(value: str) -> str:
@@ -47,6 +53,9 @@ class Default(WorkerEntrypoint):
         if not domain:
             return json_response({"error": "domain is required"}, HTTPStatus.BAD_REQUEST)
 
-        query = f"SELECT {OFFER_FIELDS} FROM offers WHERE domain = ?"
+        query = f"SELECT {OFFER_FIELDS} FROM offers JOIN banks ON banks.slug = offers.bank_slug WHERE offers.domain = ?"
         results = await self.env.offers_db.prepare(query).bind(domain).all()
-        return json_response(results.results)
+        return json_response(
+            results.results,
+            headers={"Cache-Control": "public, max-age=300, s-maxage=300"},
+        )
