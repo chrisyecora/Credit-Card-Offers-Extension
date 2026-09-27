@@ -66,8 +66,8 @@ def offer_values(offer: object, last_seen_at: str, index: int) -> tuple[str, ...
 
     # The source ID is stable when provided. Only the known missing-ID case needs
     # a deterministic fallback identity.
-    if raw_id and bank_slug == "american_express":
-        # One AmEx offer can apply to more than one website.
+    if raw_id and bank_slug in {"american_express", "chase"}:
+        # One AmEx or Chase offer can apply to more than one website.
         identity_parts = (bank_slug, raw_id, values["domain"])
     elif raw_id:
         identity_parts = (bank_slug, raw_id)

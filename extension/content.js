@@ -105,6 +105,7 @@
     const destinations = {
       capital_one: { url: "https://capitaloneoffers.com", label: "Open Capital One offers" },
       american_express: { url: "https://global.americanexpress.com/offers/eligible", label: "Open AmEx offers" },
+      chase: { url: "https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub", label: "Open Chase offers" },
     };
     const destination = destinations[offer.bank_slug];
     if (!destination) {
