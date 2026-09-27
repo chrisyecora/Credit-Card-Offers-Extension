@@ -1,51 +1,88 @@
-## Usage
+## Fresh offer workflow
 
-### Multi-bank data
+The API shows an offer for 14 days after it was last captured by a published
+scrape. It hides all offers from a bank if that bank has not had a published
+complete scrape in 14 days. A later scrape that omits an offer leaves its old
+`last_seen_at` intact until that offer ages out. Unpublished and failed runs
+never affect API results. Scrape each bank at least twice a week.
 
-Migration `0002_create_banks.sql` drops the old `offers` table and creates
-`banks` plus bank-scoped offers. Applying it deletes existing offers. After
-configuring Cloudflare credentials, run from `offers-api/`:
+Apply migrations `0006_create_offer_observations.sql` through
+`0008_index_published_scrape_freshness.sql` before loading new captures. Existing rows in
+the legacy `offers` table are kept for rollback but
+are not served by the new API. For production, publish a fresh capture for each
+bank **before** deploying the API query change:
 
-```
-npm exec wrangler -- d1 migrations apply offers-db --remote
-python3 scripts/load_offers.py --apply
-```
+1. From the repository root, run `pipenv run python scrape_capital_one.py`,
+   `pipenv run python scrape_amex.py`, and `pipenv run python scrape_chase.py`
+   in their authenticated browsers. Each writes an offer array and a matching
+   `.meta.json` file with its capture time, row count, SHA-256 digest, and any
+   scraper warnings.
+2. Review each scraper's captured and skipped counts, warnings, and the JSON
+   output. A partial scrape must not be confirmed; rerun it instead. Empty
+   captures are rejected.
+   If Capital One encounters a bad feed response after collecting offers, it
+   writes `offers_partial.json` for inspection without capture metadata and
+   leaves the previous `offers.json` untouched. The partial file cannot be
+   loaded into D1.
+3. Dry-run each file, then publish it only after confirming it is complete:
 
-The loader accepts the existing Capital One `offers.json`. To collect and load
-American Express offers, run these commands from the repository root after
-logging in through the scraper's browser:
+   ```sh
+   python offers-api/scripts/load_offers.py --input offers.json
+   python offers-api/scripts/load_offers.py --input offers.json --apply --confirm-complete
+   python offers-api/scripts/load_offers.py --input offers_amex.json
+   python offers-api/scripts/load_offers.py --input offers_amex.json --apply --confirm-complete
+   python offers-api/scripts/load_offers.py --input offers_chase.json
+   python offers-api/scripts/load_offers.py --input offers_chase.json --apply --confirm-complete
+   ```
 
-```
-pipenv run python scrape_amex.py
-python offers-api/scripts/load_offers.py --input offers_amex.json
-python offers-api/scripts/load_offers.py --input offers_amex.json --apply
-```
+The loader rejects files older than 24 hours, metadata mismatches, mixed banks,
+duplicate identities, and empty captures. It stages rows under an unpublished
+run and publishes the run after every batch uploads. Rerunning the same capture
+is safe; if an upload failed, rerun the command to finish that run. Published
+imports remove at most one expired run for that bank after 30 days, spreading
+cleanup writes across scrape days. Use `--local`
+alongside `--apply --confirm-complete` to load local D1 for testing.
 
-If AmEx login fails in the scraper browser, sign in using your usual browser,
+Capital One's encoded `raw_id` includes a page context that changes between
+scrapes. The loader keys those offers by the encoded inventory source and
+merchant domain, while retaining the original `raw_id` in each observation.
+An unrecognized Capital One ID fails validation instead of creating a new
+identity for every scrape.
+
+Apply production migrations intentionally from `offers-api/` with
+`npm exec wrangler -- d1 migrations apply offers-db --remote`. Then publish all
+three banks before deploying the new Worker with `npm run deploy`. For local
+verification, apply migrations with `--local` and start the Worker with
+`npm run dev --local`.
+
+For Amex, `pipenv run python scrape_amex.py` opens or reuses a normal Chrome
+window with a separate persistent profile under `user_data/amex-cdp`. Sign in
+there, then press Enter in the terminal. The scraper opens Amex Offers in that
+Chrome window and captures the Offers Hub response. Chrome chooses a
+local debugging port automatically; the window stays open after the capture.
+Close it when finished. If Chrome is installed elsewhere, set `CHROME_BINARY`
+to its executable path. The advanced `--cdp-url` option remains available for
+attaching to a Chrome window started separately.
+
+If Amex login still fails in normal Chrome, sign in using your usual browser,
 open DevTools Network, click Search with an empty query, and save the **Response**
 body from `ReadOffersHubPresentation.web.v1` as `auth/amex-response.json`.
-Then run `pipenv run python scrape_amex.py --input-payload auth/amex-response.json`.
-The `auth/` directory is ignored by Git; do not commit or share the raw response.
+Then run `pipenv run python scrape_amex.py --input-payload auth/amex-response.json`
+to inspect its parsed offers. This saved-response path does not create publishable
+capture metadata; use a fresh browser scrape before loading D1. The `auth/`
+directory is ignored by Git; do not commit or share the raw response.
 
-Review the generated file and dry-run counts before `--apply`. Apply migration
-`0004_allow_offer_multiple_domains.sql` to the target D1 database before loading
-AmEx records. The scraper captures only merchant offers with explicitly qualifying
+The scraper captures only merchant offers with explicitly qualifying
 website domains, reports skipped offers, and warns when a response reaches 100
 entries. It never enrolls an offer. The Capital One scraper is now
 `scrape_capital_one.py` and continues to write `offers.json`.
 
-If login fails in a Playwright-launched window, launch regular Chrome with a
-separate local profile and a loopback-only debugging port. Log in manually in
-that window, open AmEx Offers, then run the scraper in attach mode:
-
-```
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir="$PWD/user_data/amex-cdp"
-pipenv run python scrape_amex.py --cdp-url http://127.0.0.1:9222
-```
-
-Run these commands from the repository root. The scraper attaches to the open
-offers tab, clicks Search with an empty query, captures the network response,
-and writes normalized JSON. Close the debug-enabled Chrome window afterward.
+The Chase scraper checks whether its first response or a prefetched response
+already contains both card accounts. If a card is still missing, it asks you
+to switch cards in Chrome and press Enter. It verifies that the displayed card
+changed and that a new account offers response arrived. If either check fails,
+the scrape stops without replacing `offers_chase.json` or creating publishable
+metadata.
 
 New bank feeds should
 provide `bank_slug` (lowercase letters, digits, and underscores) and `bank` (the

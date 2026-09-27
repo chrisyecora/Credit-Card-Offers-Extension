@@ -3,22 +3,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from workers import Response, WorkerEntrypoint
 
-from bank_filters import bank_where_clause, parse_bank_filter
+from bank_filters import parse_bank_filter
+from offer_freshness import cutoff_timestamp, offer_query
 
 
 CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
-OFFER_FIELDS = """
-    offers.domain,
-    offers.merchant_name,
-    offers.reward_rate,
-    offers.channel,
-    banks.name AS bank,
-    banks.slug AS bank_slug,
-    offers.logo_url,
-    offers.last_seen_at
-"""
-
-
 def json_response(
     data,
     status: HTTPStatus = HTTPStatus.OK,
@@ -70,12 +59,11 @@ class Default(WorkerEntrypoint):
         except ValueError as error:
             return json_response({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
-        query = (
-            f"SELECT {OFFER_FIELDS} FROM offers JOIN banks ON banks.slug = offers.bank_slug "
-            f"WHERE offers.domain = ?{bank_where_clause(bank_slugs)}"
-        )
-        results = await self.env.offers_db.prepare(query).bind(domain, *(bank_slugs or [])).all()
+        cutoff = cutoff_timestamp()
+        results = await self.env.offers_db.prepare(offer_query(bank_slugs)).bind(
+            domain, cutoff, cutoff, domain, *(bank_slugs or [])
+        ).all()
         return json_response(
             results.results,
-            headers={"Cache-Control": "public, max-age=300, s-maxage=300"},
+            headers={"Cache-Control": "no-store"},
         )

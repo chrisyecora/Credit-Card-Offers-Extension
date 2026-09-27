@@ -2,11 +2,20 @@
 /auth/
 /user_data/
 /offers.json
+/offers.json.meta.json
+/offers.json.meta.json.tmp
+/offers.json.tmp
+/offers_partial.json
+/offers_partial.json.tmp
 # Generated American Express feed and its atomic-write staging file
 /offers_amex.json
 /offers_amex.json.tmp
+/offers_amex.json.meta.json
+/offers_amex.json.meta.json.tmp
 /offers_chase.json
 /offers_chase.json.tmp
+/offers_chase.json.meta.json
+/offers_chase.json.meta.json.tmp
 
 # Secrets and local configuration
 .env

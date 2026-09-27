@@ -37,6 +37,28 @@ def display(**changes):
 
 
 class ChaseOfferTests(unittest.TestCase):
+    def test_manual_card_switch_must_change_displayed_card(self):
+        from scrape_chase import same_card
+
+        labels = ["Freedom Flex (••••1234)", "Sapphire Preferred (...5977)"]
+        self.assertTrue(same_card("Sapphire Preferred (...5977)", labels[1]))
+        self.assertFalse(same_card("Sapphire Preferred (...5977)", labels[0]))
+
+    def test_prefetched_card_accounts_are_not_discarded(self):
+        from scrape_chase import account_ids, new_account_payload
+
+        first = {"customerOffers": [{"digitalAccountIdentifier": "card-a", "offers": [merchant()]}]}
+        second = {"customerOffers": [
+            first["customerOffers"][0],
+            {"digitalAccountIdentifier": "card-b", "offers": [merchant(offerIdentifier="second")]},
+        ]}
+        seen = account_ids(first)
+        added = new_account_payload(second, seen)
+        self.assertEqual(account_ids(added), {"card-b"})
+        seen.update(account_ids(added))
+        self.assertEqual(len(seen), 2)
+        self.assertIsNone(new_account_payload(second, seen))
+
     def test_online_merchant_uses_link_and_maps_fields(self):
         records, reason = offer_records(merchant())
         self.assertIsNone(reason)
@@ -118,7 +140,7 @@ class ChaseOfferTests(unittest.TestCase):
         first_values = module.offer_values(chase, "2026-09-26T00:00:00Z", 1)
         second_values = module.offer_values(second, "2026-09-26T00:00:00Z", 2)
         self.assertNotEqual(first_values[0], second_values[0])
-        old_key = hashlib.sha256("capital_one\x00old-id".encode()).hexdigest()
+        old_key = hashlib.sha256("capital_one\x00old-id\x00example.com".encode()).hexdigest()
         migration_dir = root / "offers-api/migrations"
         with sqlite3.connect(":memory:") as connection:
             for migration in sorted(migration_dir.glob("*.sql")):
@@ -126,7 +148,12 @@ class ChaseOfferTests(unittest.TestCase):
             connection.execute(module.bank_statement("capital_one", "Capital One"))
             connection.execute(module.bank_statement("american_express", "American Express"))
             connection.execute(module.bank_statement("chase", "Chase"))
-            capital_one = {**chase, "bank": "Capital One", "bank_slug": "capital_one", "raw_id": "old-id"}
+            import base64
+            capital_id = base64.urlsafe_b64encode(json.dumps({
+                "inventory": {"source": "old-id", "merchantTLD": chase["domain"]},
+                "viewContext": "page-1", "offers": ["offer"], "v": 1,
+            }).encode()).decode().rstrip("=")
+            capital_one = {**chase, "bank": "Capital One", "bank_slug": "capital_one", "raw_id": capital_id}
             capital_one_values = module.offer_values(capital_one, "2026-09-26T00:00:00Z", 3)
             self.assertEqual(capital_one_values[0], old_key)
             amex = {**chase, "bank": "American Express", "bank_slug": "american_express"}

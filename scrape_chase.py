@@ -3,12 +3,15 @@
 import argparse
 import asyncio
 import json
+import re
 import sys
+import time
 from pathlib import Path
 
 from playwright.async_api import async_playwright
 
 from chase_offers import AccountOffers, offers_from_payload
+from capture_artifact import write_capture, write_unverified_capture
 
 
 USER_DATA_DIR = Path("user_data/chase")
@@ -16,11 +19,39 @@ OUTPUT_FILE = Path("offers_chase.json")
 OFFERS_URL = "https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub"
 RESPONSE_PATH = "/digital-customer-targeted-offers/v3/customer-offers"
 CARD_SELECTOR = '[data-testid="select-credit-card-account"]'
+EXPECTED_CARD_COUNT = 2
 
 
-def save_offers(captures: list[tuple[str, list[AccountOffers]]]) -> None:
+def account_ids(payload: dict) -> set[str]:
+    return {
+        str(account["digitalAccountIdentifier"])
+        for account in payload["customerOffers"]
+        if isinstance(account, dict) and account.get("digitalAccountIdentifier")
+    }
+
+
+def new_account_payload(payload: dict, seen_accounts: set[str]) -> dict | None:
+    accounts = [
+        account for account in payload["customerOffers"]
+        if isinstance(account, dict) and
+        account.get("digitalAccountIdentifier") and
+        str(account["digitalAccountIdentifier"]) not in seen_accounts
+    ]
+    return {"customerOffers": accounts} if accounts else None
+
+
+def same_card(selected: str, label: str) -> bool:
+    selected_digits = re.findall(r"(?<!\d)\d{4}(?!\d)", selected)
+    label_digits = re.findall(r"(?<!\d)\d{4}(?!\d)", label)
+    if selected_digits and label_digits:
+        return selected_digits[-1] == label_digits[-1]
+    return " ".join(selected.casefold().split()) == " ".join(label.casefold().split())
+
+
+def save_offers(captures: list[tuple[str, list[AccountOffers]]], verified_source: bool = True) -> None:
     merged: dict[tuple[str, str], dict[str, str]] = {}
     conflicts: set[tuple[str, str]] = set()
+    warnings = []
     for label, accounts in captures:
         for account in accounts:
             print(
@@ -29,9 +60,13 @@ def save_offers(captures: list[tuple[str, list[AccountOffers]]]) -> None:
                 f"across {len(account.records)} domains; skipped {len(account.skipped)}."
             )
             if account.available_count is not None and account.returned_count < account.available_count:
+                warning = (
+                    f"{label}: response reports {account.available_count} available offers "
+                    f"but returned only {account.returned_count} entries."
+                )
+                warnings.append(warning)
                 print(
-                    f"  Warning: response reports {account.available_count} available offers "
-                    f"but returned only {account.returned_count} entries. Review completeness."
+                    f"  Warning: {warning} Review completeness."
                 )
             for offer_id, reason in account.skipped:
                 print(f"  {offer_id}: {reason}")
@@ -46,19 +81,22 @@ def save_offers(captures: list[tuple[str, list[AccountOffers]]]) -> None:
                 else:
                     merged[key] = record
     for offer_id, domain in sorted(conflicts):
-        print(f"  Conflict across cards for {offer_id} at {domain}; omitted pending review.")
+        warning = f"Conflict across cards for {offer_id} at {domain}; omitted pending review."
+        warnings.append(warning)
+        print(f"  {warning}")
     if not merged:
         raise RuntimeError("No domain-matchable Chase offers were captured; existing output was not replaced")
     records = sorted(merged.values(), key=lambda item: (item["merchant_name"].lower(), item["domain"], item["raw_id"]))
-    temporary = OUTPUT_FILE.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    temporary.replace(OUTPUT_FILE)
+    if verified_source:
+        write_capture(OUTPUT_FILE, records, "chase", warnings)
+    else:
+        write_unverified_capture(OUTPUT_FILE, records)
     print(f"Saved {len(records)} Chase domain matches to {OUTPUT_FILE}.")
 
 
 def import_payload(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    save_offers([("Saved response", offers_from_payload(payload))])
+    save_offers([("Saved response", offers_from_payload(payload))], verified_source=False)
 
 
 async def main(cdp_url: str | None = None) -> None:
@@ -94,15 +132,12 @@ async def main(cdp_url: str | None = None) -> None:
             context.on("response", handle_response)
 
             async def next_payload(timeout: int = 30, seen_accounts: set[str] | None = None) -> dict:
+                deadline = time.monotonic() + timeout
                 while True:
-                    payload = await asyncio.wait_for(responses.get(), timeout=timeout)
-                    identifiers = {
-                        str(account.get("digitalAccountIdentifier"))
-                        for account in payload["customerOffers"]
-                        if isinstance(account, dict) and account.get("digitalAccountIdentifier")
-                    }
-                    if not seen_accounts or not identifiers.issubset(seen_accounts):
+                    payload = await asyncio.wait_for(responses.get(), timeout=max(0, deadline - time.monotonic()))
+                    if not seen_accounts or account_ids(payload) - seen_accounts:
                         return payload
+                    print("Ignored a Chase offers response for an account already captured.")
 
             print("Opening Chase Offers. Log in manually if prompted.")
             await page.goto(OFFERS_URL, wait_until="domcontentloaded")
@@ -117,34 +152,46 @@ async def main(cdp_url: str | None = None) -> None:
             await selector.wait_for(state="visible", timeout=15000)
             selected = (await selector.locator('[data-mds-select-value-text="true"]').inner_text()).strip()
             captures = [(selected, offers_from_payload(first_payload))]
-            seen_accounts = {
-                str(account.get("digitalAccountIdentifier"))
-                for account in first_payload["customerOffers"]
-                if isinstance(account, dict) and account.get("digitalAccountIdentifier")
-            }
+            seen_accounts = account_ids(first_payload)
+            print(f"Initial Chase response included {len(seen_accounts)} card account(s).")
 
-            await selector.click()
-            options = page.get_by_role("listbox").get_by_role("option")
-            option_labels = [label.strip() for label in await options.all_text_contents()]
-            await page.keyboard.press("Escape")
-            if len(option_labels) < 2:
-                raise RuntimeError("The Chase card menu did not expose both cards; existing output was not replaced")
-            for index, label in enumerate(option_labels):
-                if selected in label or label in selected:
-                    continue
-                while not responses.empty():
-                    responses.get_nowait()
-                await selector.click()
-                await page.get_by_role("listbox").get_by_role("option").nth(index).click()
+            print(f"Expecting offers from {EXPECTED_CARD_COUNT} Chase cards.")
+            while not responses.empty():
+                prefetched = responses.get_nowait()
+                added = new_account_payload(prefetched, seen_accounts)
+                if added:
+                    captures.append(("Prefetched card", offers_from_payload(added)))
+                    seen_accounts.update(account_ids(added))
+            if len(seen_accounts) >= EXPECTED_CARD_COUNT:
+                print(f"Already captured {len(seen_accounts)} card accounts; no card switch needed.")
+                save_offers(captures)
+                return
+            while len(seen_accounts) < EXPECTED_CARD_COUNT:
+                print(f"Current Chase card: {selected}. Switch to another card in Chrome.")
+                await asyncio.to_thread(input, "Press ENTER after the other card's offers appear...")
+                switched_to = (await selector.locator('[data-mds-select-value-text="true"]').inner_text()).strip()
+                if same_card(selected, switched_to):
+                    raise RuntimeError(
+                        "The displayed Chase card did not change; existing output was not replaced"
+                    )
+                print(f"Chase card changed to {switched_to}; checking its offers response.")
                 try:
-                    payload = await next_payload(seen_accounts=seen_accounts)
+                    payload = await next_payload(timeout=10, seen_accounts=seen_accounts)
                 except TimeoutError as error:
-                    raise RuntimeError(f"No new offers response arrived after selecting {label}") from error
-                captures.append((label, offers_from_payload(payload)))
-                seen_accounts.update(
-                    str(account.get("digitalAccountIdentifier"))
-                    for account in payload["customerOffers"]
-                    if isinstance(account, dict) and account.get("digitalAccountIdentifier")
+                    raise RuntimeError(
+                        f"No new account offers response arrived after switching to {switched_to}; "
+                        f"captured {len(seen_accounts)} of {EXPECTED_CARD_COUNT} cards, so existing output was not replaced"
+                    ) from error
+                added = new_account_payload(payload, seen_accounts)
+                if added is None:
+                    raise RuntimeError("Card response had no new account; existing output was not replaced")
+                captures.append((switched_to, offers_from_payload(added)))
+                seen_accounts.update(account_ids(added))
+                selected = switched_to
+            if len(seen_accounts) < EXPECTED_CARD_COUNT:
+                raise RuntimeError(
+                    f"Captured {len(seen_accounts)} of {EXPECTED_CARD_COUNT} Chase cards; "
+                    "existing output was not replaced"
                 )
             save_offers(captures)
         finally:

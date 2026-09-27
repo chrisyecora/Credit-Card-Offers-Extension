@@ -17,8 +17,7 @@
 		{
 			"binding": "offers_db",
 			"database_name": "offers-db",
-			"database_id": "a722ed18-cd0f-4335-b913-415e63cb49b7",
-			"remote": true
+			"database_id": "a722ed18-cd0f-4335-b913-415e63cb49b7"
 		}
 	]
 	/**

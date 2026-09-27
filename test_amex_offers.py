@@ -1,8 +1,11 @@
 import hashlib
 import importlib.util
+import json
 import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from amex_offers import normalize_domain, offer_records, offers_from_payload, qualifying_domains
 
@@ -35,6 +38,33 @@ def merchant(**changes):
 
 
 class AmexOfferTests(unittest.TestCase):
+    def test_default_chrome_command_reuses_profile_window(self):
+        from scrape_amex import open_manual_chrome
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scrape_amex.CHROME_PROFILE_DIR", Path(directory)
+        ), patch(
+            "scrape_amex.active_chrome_endpoint", return_value="http://127.0.0.1:9222"
+        ), patch("scrape_amex.subprocess.Popen") as launch:
+            self.assertEqual(open_manual_chrome(), "http://127.0.0.1:9222")
+            launch.assert_not_called()
+
+    def test_default_chrome_command_starts_isolated_profile(self):
+        from scrape_amex import open_manual_chrome
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scrape_amex.CHROME_PROFILE_DIR", Path(directory)
+        ), patch(
+            "scrape_amex.active_chrome_endpoint",
+            side_effect=[None, "http://127.0.0.1:49214"],
+        ), patch("scrape_amex.chrome_executable", return_value="/chrome"):
+            with patch("scrape_amex.subprocess.Popen") as launch:
+                self.assertEqual(open_manual_chrome(), "http://127.0.0.1:49214")
+                arguments = launch.call_args.args[0]
+                self.assertIn("--remote-debugging-address=127.0.0.1", arguments)
+                self.assertIn("--remote-debugging-port=0", arguments)
+                self.assertIn(f"--user-data-dir={Path(directory).resolve()}", arguments)
+
     def test_supplied_dollar_general_shape(self):
         records, reason = offer_records(merchant())
         self.assertIsNone(reason)
@@ -92,9 +122,14 @@ class AmexOfferTests(unittest.TestCase):
         second = module.offer_values(another_domain, "2026-09-26T00:00:00Z", 2)
         self.assertNotEqual(first[0], second[0])
 
-        capital_one = {**amex, "bank": "Capital One", "bank_slug": "capital_one"}
+        import base64
+        capital_id = base64.urlsafe_b64encode(json.dumps({
+            "inventory": {"source": "PX3fW9.ED6", "merchantTLD": amex["domain"]},
+            "viewContext": "page-1", "offers": ["offer"], "v": 1,
+        }).encode()).decode().rstrip("=")
+        capital_one = {**amex, "bank": "Capital One", "bank_slug": "capital_one", "raw_id": capital_id}
         old_key = hashlib.sha256("capital_one\x00PX3fW9.ED6".encode()).hexdigest()
-        self.assertEqual(module.offer_values(capital_one, "2026-09-26T00:00:00Z", 3)[0], old_key)
+        self.assertNotEqual(module.offer_values(capital_one, "2026-09-26T00:00:00Z", 3)[0], old_key)
 
         migration_dir = root / "offers-api/migrations"
         with sqlite3.connect(":memory:") as connection:

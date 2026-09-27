@@ -1,11 +1,19 @@
 import os
 import asyncio
-import re
-import json
+from pathlib import Path
+from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
 
+from capture_artifact import write_capture, write_unverified_capture
+
 USER_DATA_DIR = "./user_data/capitalone"
-OUTPUT_FILE = "offers.json"
+OUTPUT_FILE = Path("offers.json")
+PARTIAL_OUTPUT_FILE = Path("offers_partial.json")
+IGNORED_FEED_RESOURCES = {
+    "merchant-categories.data",
+    "activated-offers.data",
+    "headline-offers.data",
+}
 
 def sanitize_domain(domain: str) -> str:
     """Cleans domain strings for exact matching (e.g., 'www.nike.com/foo' -> 'nike.com')."""
@@ -15,6 +23,43 @@ def sanitize_domain(domain: str) -> str:
     if domain.startswith("www."):
         domain = domain[4:]
     return domain.split("/")[0]
+
+
+def offer_feed_items(payload: object) -> list[dict] | None:
+    """Other /feed/ endpoints return lists and unrelated resource objects."""
+    if not isinstance(payload, dict):
+        return None
+    items = payload.get("data")
+    if not isinstance(items, list) or not items:
+        return None
+    if not any(isinstance(item, dict) and "merchantTLD" in item for item in items):
+        return None
+    if any(not isinstance(item, dict) for item in items):
+        raise ValueError("offer feed contains a non-object item")
+    return items
+
+
+def preserve_partial(all_offers: dict) -> str:
+    if not all_offers:
+        return ""
+    write_unverified_capture(PARTIAL_OUTPUT_FILE, list(all_offers.values()))
+    return f" {len(all_offers)} offers saved to {PARTIAL_OUTPUT_FILE} for review."
+
+
+def finish_capture(all_offers: dict, captured_batches: int, response_errors: list[str]) -> None:
+    offers_list = list(all_offers.values())
+    if response_errors:
+        details = "; ".join(response_errors[:3])
+        extra = f"; {len(response_errors) - 3} more" if len(response_errors) > 3 else ""
+        partial = preserve_partial(all_offers)
+        raise RuntimeError(
+            f"Capture had {len(response_errors)} feed error(s): {details}{extra}.{partial} "
+            f"{OUTPUT_FILE} was not replaced."
+        )
+    if captured_batches == 0 or not offers_list:
+        raise RuntimeError(f"No usable offer feed was captured; {OUTPUT_FILE} was not replaced")
+    write_capture(OUTPUT_FILE, offers_list, "capital_one")
+    PARTIAL_OUTPUT_FILE.unlink(missing_ok=True)
 
 
 async def main():
@@ -29,22 +74,37 @@ async def main():
         
         page = context.pages[0] if context.pages else await context.new_page()
         all_offers = {}
+        response_errors = []
+        captured_batches = 0
 
         # 1. Network interceptor
         async def handle_response(response):
-            if re.search(r"capitaloneoffers\.com/feed/", response.url) and response.status == 200:
+            nonlocal captured_batches
+            url = urlsplit(response.url)
+            if url.hostname and (
+                url.hostname == "capitaloneoffers.com" or
+                url.hostname.endswith(".capitaloneoffers.com")
+            ) and url.path.startswith("/feed/"):
+                resource = url.path.rsplit("/", maxsplit=1)[-1]
+                if resource in IGNORED_FEED_RESOURCES:
+                    return
+                if response.status != 200:
+                    response_errors.append(f"HTTP {response.status} at {resource}")
+                    return
                 try:
                     payload = await response.json()
-                    items = payload.get("data", [])
+                    items = offer_feed_items(payload)
+                    if items is None:
+                        return
                     print(f"[Captured] {len(items)} items from feed batch.")
-                    
+                    batch = {}
                     for item in items:
                         raw_domain = item.get("merchantTLD", "")
                         domain = sanitize_domain(raw_domain)
                         offer_id = item.get("id") or domain
-                        
-                        if domain and offer_id and offer_id not in all_offers:
-                            all_offers[offer_id] = {
+
+                        if domain and offer_id and offer_id not in all_offers and offer_id not in batch:
+                            batch[offer_id] = {
                                 "domain": domain,
                                 "merchant_name": item.get("merchantDisplayName"),
                                 "reward_rate": item.get("buttonText"),
@@ -54,8 +114,12 @@ async def main():
                                 "raw_id": item.get("id"),
                                 "logo_url": item.get("imageSrc")
                             }
+                    all_offers.update(batch)
+                    captured_batches += 1
                 except Exception as e:
-                    print(f"Error parsing payload: {e}")
+                    error = f"{resource}: {type(e).__name__}: {e}"
+                    print(f"Error parsing feed response: {error}")
+                    response_errors.append(error)
 
         context.on("response", handle_response)
 
@@ -85,10 +149,10 @@ async def main():
             page = await page_info.value
             print("Switched to Capital One Offers tab!")
 
-        except TimeoutError:
-            print("Timed out waiting for 'View all offers' button or new page load.")
+        except TimeoutError as error:
+            raise RuntimeError("Timed out opening the complete offers page") from error
         except Exception as e:
-            print(f"Could not click 'View all offers': {e}")
+            raise RuntimeError("Could not open the complete offers page") from e
 
         # 4. Expansion loop
         await page.wait_for_timeout(3000)
@@ -106,16 +170,17 @@ async def main():
                     await page.wait_for_timeout(1500)
                 else:
                     break
-            except Exception as e:
-                print(f"Pagination finished or stopped: {e}")
-                break
+            except Exception as error:
+                partial = preserve_partial(all_offers)
+                raise RuntimeError(f"Offer pagination stopped unexpectedly.{partial}") from error
 
+        if await view_more_btn.is_visible():
+            partial = preserve_partial(all_offers)
+            raise RuntimeError(f"Offer pagination reached the 50-page safety limit.{partial}")
         print(f"\nCaptured {len(all_offers)} total unique offers!")
 
-        # 5. Save directly to local JSON file
-        offers_list = list(all_offers.values())
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(offers_list, f, indent=2)
+        # 5. A partial file can be reviewed, but cannot be loaded into D1.
+        finish_capture(all_offers, captured_batches, response_errors)
 
         print(f"Successfully saved data to '{OUTPUT_FILE}'.")
         await context.close()
