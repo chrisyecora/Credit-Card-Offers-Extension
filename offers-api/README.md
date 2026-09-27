@@ -53,6 +53,18 @@ display name) on every offer. Raw offer IDs only need to be unique within their
 bank and domain. `/v1/offers?domain=example.com` returns offers from every loaded bank,
 including both `bank` and `bank_slug` in each result.
 
+Apply migration `0005_add_bank_offers_urls.sql` before deploying the bank catalog
+endpoint. It adds `offers_url` to `banks` and fills the existing Capital One,
+American Express, and Chase destinations. New bank feeds should also set an
+HTTPS `offers_url` in the `banks` table; offer loading updates bank names but
+preserves this URL.
+
+`GET /v1/banks` returns a list of `{ "slug", "name", "offers_url" }` objects,
+sorted by name. `GET /v1/offers?domain=example.com&banks=capital_one,american_express`
+returns only those banks. Omit `banks` for all banks. An empty or malformed
+`banks` parameter returns HTTP 400; an unknown but well-formed slug simply has
+no matching offers.
+
 You can run the Worker defined by your new project by executing `wrangler dev` in this
 directory. This will start up an HTTP server and will allow you to iterate on your
 Worker without having to restart `wrangler`.

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Offer banks</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Offer banks</h1>
+        <p>Choose which banks appear while you shop.</p>
+      </header>
+      <section aria-label="Bank preferences">
+        <div id="bank-list" aria-live="polite">Loading banks…</div>
+      </section>
+      <p id="status" role="status"></p>
+      <button id="retry" type="button" hidden>Try again</button>
+      <footer>Offers may be targeted and might not be available on your account.</footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

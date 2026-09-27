@@ -3,6 +3,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from workers import Response, WorkerEntrypoint
 
+from bank_filters import bank_where_clause, parse_bank_filter
+
 
 CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
 OFFER_FIELDS = """
@@ -45,16 +47,34 @@ class Default(WorkerEntrypoint):
         if url.path == "/health":
             return json_response({"status": "ok"})
 
+        if url.path == "/v1/banks":
+            results = await self.env.offers_db.prepare(
+                "SELECT slug, name, offers_url FROM banks ORDER BY name"
+            ).all()
+            return json_response(
+                results.results,
+                headers={"Cache-Control": "public, max-age=300, s-maxage=300"},
+            )
+
         if url.path != "/v1/offers":
             return json_response({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
-        domain_values = parse_qs(url.query).get("domain", [])
+        parameters = parse_qs(url.query, keep_blank_values=True)
+        domain_values = parameters.get("domain", [])
         domain = normalize_domain(domain_values[0]) if domain_values else ""
         if not domain:
             return json_response({"error": "domain is required"}, HTTPStatus.BAD_REQUEST)
 
-        query = f"SELECT {OFFER_FIELDS} FROM offers JOIN banks ON banks.slug = offers.bank_slug WHERE offers.domain = ?"
-        results = await self.env.offers_db.prepare(query).bind(domain).all()
+        try:
+            bank_slugs = parse_bank_filter(parameters.get("banks"))
+        except ValueError as error:
+            return json_response({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+        query = (
+            f"SELECT {OFFER_FIELDS} FROM offers JOIN banks ON banks.slug = offers.bank_slug "
+            f"WHERE offers.domain = ?{bank_where_clause(bank_slugs)}"
+        )
+        results = await self.env.offers_db.prepare(query).bind(domain, *(bank_slugs or [])).all()
         return json_response(
             results.results,
             headers={"Cache-Control": "public, max-age=300, s-maxage=300"},

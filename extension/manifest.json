@@ -13,7 +13,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Credit Card Offer Checker"
+    "default_title": "Credit Card Offer Checker",
+    "default_popup": "popup.html"
   },
   "web_accessible_resources": [
     {
