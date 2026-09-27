@@ -18,6 +18,10 @@
       console.error("[offer-checker] API error", response.error);
       return;
     }
+    if (response?.suppressed) {
+      console.info("[offer-checker] notice already shown recently", domain);
+      return;
+    }
     if (!response?.offers?.length) {
       console.info("[offer-checker] no offers", domain);
       return;

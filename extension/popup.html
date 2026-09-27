@@ -3,20 +3,32 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Offer banks</title>
+    <title>Credit card offers</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <main>
-      <header>
-        <h1>Offer banks</h1>
-        <p>Choose which banks appear while you shop.</p>
-      </header>
-      <section aria-label="Bank preferences">
-        <div id="bank-list" aria-live="polite">Loading banks…</div>
+      <section id="offers-view" aria-label="Offers for this site">
+        <header class="view-header">
+          <h1>Offers for this site</h1>
+          <button id="settings-button" class="text-button" type="button" aria-label="Bank settings">Settings</button>
+        </header>
+        <p id="site-name" class="subtitle"></p>
+        <p id="offers-status" role="status">Looking for offers…</p>
+        <div id="offers-list" aria-label="Available offers"></div>
+        <button id="offers-retry" class="primary-button" type="button" hidden>Try again</button>
       </section>
-      <p id="status" role="status"></p>
-      <button id="retry" type="button" hidden>Try again</button>
+
+      <section id="settings-view" aria-label="Bank settings" hidden>
+        <header class="view-header">
+          <h1>Offer banks</h1>
+          <button id="back-button" class="text-button" type="button">Back</button>
+        </header>
+        <p class="subtitle">Choose which banks appear while you shop.</p>
+        <div id="bank-list" aria-live="polite">Loading banks…</div>
+        <p id="status" role="status"></p>
+        <button id="retry" class="primary-button" type="button" hidden>Try again</button>
+      </section>
       <footer>Offers may be targeted and might not be available on your account.</footer>
     </main>
     <script src="popup.js"></script>

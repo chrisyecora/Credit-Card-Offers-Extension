@@ -2,6 +2,8 @@ importScripts("node_modules/tldts/dist/index.umd.min.js");
 
 const API_BASE_URL = "https://offers-api.chris-yecora.workers.dev";
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
+const NOTICE_COOLDOWN_MS = 60 * 60 * 1000;
+const noticeRequests = new Map();
 let catalogRequest;
 
 function validCatalog(banks) {
@@ -80,6 +82,41 @@ async function lookupOffers(hostname) {
   };
 }
 
+async function lookupOffersForNotice(hostname) {
+  const domain = tldts.getDomain(hostname.trim().toLowerCase());
+  if (!domain) {
+    return { offers: [] };
+  }
+
+  // Serialize lookups for the same site so overlapping navigations cannot both show a notice.
+  if (noticeRequests.has(domain)) {
+    const result = await noticeRequests.get(domain);
+    return result.offers.length ? { offers: [], suppressed: true } : result;
+  }
+
+  const request = (async () => {
+    const key = `noticeShownAt:${domain}`;
+    const stored = await chrome.storage.local.get(key);
+    const shownAt = stored[key];
+    const age = Date.now() - shownAt;
+    if (typeof shownAt === "number" && age >= 0 && age < NOTICE_COOLDOWN_MS) {
+      return { offers: [], suppressed: true };
+    }
+
+    const result = await lookupOffers(domain);
+    if (result.offers.length) {
+      await chrome.storage.local.set({ [key]: Date.now() });
+    }
+    return result;
+  })();
+  noticeRequests.set(domain, request);
+  try {
+    return await request;
+  } finally {
+    noticeRequests.delete(domain);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "get-bank-catalog") {
     getBankCatalog(message.forceRefresh === true)
@@ -88,10 +125,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "lookup-offers" && typeof message.domain === "string") {
-    lookupOffers(message.domain)
+    lookupOffersForNotice(message.domain)
       .then(sendResponse)
       .catch((error) => {
         console.error("[offer-checker] lookup failed", error);
+        sendResponse({ offers: [], error: String(error) });
+      });
+    return true;
+  }
+  if (message?.type === "lookup-offers-manual" && typeof message.domain === "string") {
+    lookupOffers(message.domain)
+      .then(sendResponse)
+      .catch((error) => {
+        console.error("[offer-checker] manual lookup failed", error);
         sendResponse({ offers: [], error: String(error) });
       });
     return true;
